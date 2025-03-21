@@ -1,245 +1,448 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { SmileIcon, Bot } from "lucide-react"
-
-type Player = 1 | 2
-type Cell = Player | null
-type Board = Cell[][]
-
-const ROWS = 6
-const COLS = 7
-
-const createEmptyBoard = (): Board => {
-  return Array(ROWS)
-    .fill(null)
-    .map(() => Array(COLS).fill(null))
-}
+import type { GameState } from "@/lib/game-engine"
 
 export default function GameBoard() {
   const router = useRouter()
   const [playerName, setPlayerName] = useState<string>("Player 1")
-  const [board, setBoard] = useState<Board>(createEmptyBoard())
-  const [currentPlayer, setCurrentPlayer] = useState<Player>(1)
-  const [winner, setWinner] = useState<Player | null>(null)
-  const [isDraw, setIsDraw] = useState(false)
-  const [hoverColumn, setHoverColumn] = useState<number | null>(null)
-  const [scores, setScores] = useState({ 1: 0, 2: 0 })
+  const [gameState, setGameState] = useState<GameState | null>(null)
+  const [gameId, setGameId] = useState<string>("")
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [isPaused, setIsPaused] = useState(false)
   const [turnTimer, setTurnTimer] = useState(10)
   const [timerActive, setTimerActive] = useState(true)
   const [isCpuThinking, setIsCpuThinking] = useState(false)
+  const [hoverColumn, setHoverColumn] = useState<number | null>(null)
 
-  // Load player name on mount
+  // Load player name and game ID on mount
   useEffect(() => {
     const storedName = localStorage.getItem("playerName")
     if (storedName) {
       setPlayerName(storedName)
     }
+    
+    // Try to retrieve game ID from localStorage
+    const storedGameId = localStorage.getItem("gameId")
+    if (storedGameId) {
+      setGameId(storedGameId)
+    }
+  }, [])
+
+  // Initialize game on mount - modified to use stored game ID if available
+  useEffect(() => {
+    if (gameId) {
+      // If we have a stored game ID, try to fetch its state
+      fetchGameState(gameId)
+    } else {
+      // Otherwise initialize a new game
+      initializeGame()
+    }
   }, [])
 
   // Reset turn timer when player changes
   useEffect(() => {
-    setTurnTimer(10)
-  }, [currentPlayer])
+    if (gameState) {
+      setTurnTimer(10)
+    }
+  }, [gameState?.currentPlayer])
+
+  // Update localStorage whenever gameId changes
+  useEffect(() => {
+    if (gameId) {
+      try {
+        localStorage.setItem("gameId", gameId);
+        console.log('Game ID saved to localStorage:', gameId);
+      } catch (err) {
+        console.error('Failed to save game ID to localStorage:', err);
+      }
+    }
+  }, [gameId]);
+
+  // Make a player move - wrapped in useCallback to prevent dependency cycle
+  const makePlayerMove = useCallback(async (column: number) => {
+    if (!gameState || gameState.winner || gameState.isDraw || isPaused || gameState.currentPlayer !== 1 || isLoading) return
+
+    try {
+      setIsLoading(true)
+      setError(null)
+      
+      console.log('Making move with game ID:', gameId)
+      console.log('Current game state:', gameState)
+
+      const response = await fetch('/api/game/move', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          gameId,
+          column,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        // If game not found, try to initialize a new game and then make the move
+        if (result.error === 'Game not found') {
+          console.log('Game not found, initializing new game...');
+          
+          // Initialize a new game
+          const initResponse = await fetch('/api/game', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          const initResult = await initResponse.json();
+          
+          if (!initResult.success) {
+            throw new Error(initResult.error || 'Failed to initialize new game');
+          }
+          
+          console.log('New game initialized:', initResult.data);
+          
+          // Update state with new game
+          setGameState(initResult.data);
+          const newGameId = initResult.data.id;
+          setGameId(newGameId);
+          
+          // Explicitly update localStorage with new game ID
+          try {
+            localStorage.setItem("gameId", newGameId);
+            console.log('Updated game ID in localStorage:', newGameId);
+          } catch (err) {
+            console.error('Failed to update game ID in localStorage:', err);
+          }
+          
+          // Now make the move with the new game ID
+          const newMoveResponse = await fetch('/api/game/move', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              gameId: newGameId,
+              column,
+            }),
+          });
+          
+          const newMoveResult = await newMoveResponse.json();
+          
+          if (!newMoveResult.success) {
+            throw new Error(newMoveResult.error || 'Failed to make move with new game');
+          }
+          
+          console.log('Move successful with new game:', newMoveResult.data);
+          setGameState(newMoveResult.data);
+          return;
+        }
+        
+        // For other errors, throw as usual
+        throw new Error(result.error || 'Failed to make move')
+      }
+
+      console.log('Move successful:', result.data)
+      setGameState(result.data)
+
+      // If it's now CPU's turn and game isn't over, we'll let the useEffect trigger the CPU move
+    } catch (err) {
+      console.error('Error making move:', err)
+      setError('Failed to make move. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [gameState, isPaused, isLoading, gameId]);
+
+  // Make a CPU move - wrapped in useCallback to prevent dependency cycle
+  const makeCpuMove = useCallback(async () => {
+    if (!gameState || gameState.winner || gameState.isDraw || isPaused || gameState.currentPlayer !== 2 || isLoading) return
+
+    try {
+      setIsLoading(true)
+      setIsCpuThinking(true)
+      setError(null)
+
+      const response = await fetch('/api/game/cpu-move', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          gameId,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        // If game not found, try to initialize a new game
+        if (result.error === 'Game not found') {
+          console.log('Game not found for CPU move, initializing new game...');
+          
+          // Initialize a new game
+          const initResponse = await fetch('/api/game', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          const initResult = await initResponse.json();
+          
+          if (!initResult.success) {
+            throw new Error(initResult.error || 'Failed to initialize new game');
+          }
+          
+          console.log('New game initialized for CPU:', initResult.data);
+          
+          // Update state with new game
+          setGameState(initResult.data);
+          const newGameId = initResult.data.id;
+          setGameId(newGameId);
+          
+          // Explicitly update localStorage with new game ID
+          try {
+            localStorage.setItem("gameId", newGameId);
+            console.log('Updated game ID in localStorage for CPU move:', newGameId);
+          } catch (err) {
+            console.error('Failed to update game ID in localStorage:', err);
+          }
+          
+          return; // Don't proceed with CPU move since the new game starts with player 1
+        }
+        
+        throw new Error(result.error || 'Failed to make CPU move')
+      }
+
+      setGameState(result.data)
+    } catch (err) {
+      console.error('Error making CPU move:', err)
+      setError('Failed to make CPU move. Please try again.')
+    } finally {
+      setIsLoading(false)
+      setIsCpuThinking(false)
+    }
+  }, [gameState, isPaused, isLoading, gameId, isCpuThinking]);
 
   // Turn timer countdown
   useEffect(() => {
-    if (!timerActive || isPaused || winner || isDraw || isCpuThinking) return
+    if (!gameState || !timerActive || isPaused || gameState.winner || gameState.isDraw || isCpuThinking) return
 
     const timer = setTimeout(() => {
       if (turnTimer > 0) {
         setTurnTimer((prev) => prev - 1)
       } else {
-        // Auto-switch player when time runs out
-        setCurrentPlayer(currentPlayer === 1 ? 2 : 1)
+        // Auto-switch player 
+        if (gameState.currentPlayer === 1) {
+          makePlayerMove(hoverColumn || 0) // Make a move if timer runs out
+        } else {
+          makeCpuMove() // Trigger CPU move if it's CPU's turn
+        }
       }
     }, 1000)
 
     return () => clearTimeout(timer)
-  }, [turnTimer, timerActive, isPaused, winner, isDraw, currentPlayer, isCpuThinking])
+  }, [turnTimer, timerActive, isPaused, gameState, isCpuThinking, hoverColumn, makePlayerMove, makeCpuMove])
 
-  // Win detection
-  const checkWin = useCallback((board: Board, row: number, col: number): boolean => {
-    const directions = [
-      [0, 1], // horizontal
-      [1, 0], // vertical
-      [1, 1], // diagonal down-right
-      [1, -1], // diagonal down-left
-    ]
-
-    const player = board[row][col]
-
-    for (const [dx, dy] of directions) {
-      let count = 1
-
-      // Check in positive direction
-      for (let i = 1; i < 4; i++) {
-        const newRow = row + i * dx
-        const newCol = col + i * dy
-
-        if (newRow >= 0 && newRow < ROWS && newCol >= 0 && newCol < COLS && board[newRow][newCol] === player) {
-          count++
-        } else {
-          break
-        }
-      }
-
-      // Check in negative direction
-      for (let i = 1; i < 4; i++) {
-        const newRow = row - i * dx
-        const newCol = col - i * dy
-
-        if (newRow >= 0 && newRow < ROWS && newCol >= 0 && newCol < COLS && board[newRow][newCol] === player) {
-          count++
-        } else {
-          break
-        }
-      }
-
-      if (count >= 4) return true
-    }
-
-    return false
-  }, [])
-
-  // Draw detection
-  const checkDraw = useCallback((board: Board): boolean => {
-    return board[0].every((cell) => cell !== null)
-  }, [])
-
-  const dropPiece = useCallback((col: number) => {
-    // Early return conditions - prevent moves when game is over or paused
-    if (winner || isDraw || isPaused) return
-    
-    // For player 2 (CPU), only allow moves when CPU is thinking
-    if (currentPlayer === 2 && !isCpuThinking) return
-
-    const newBoard = [...board]
-
-    // Find the lowest empty row in the selected column
-    for (let row = ROWS - 1; row >= 0; row--) {
-      if (!newBoard[row][col]) {
-        newBoard[row][col] = currentPlayer
-        setBoard(newBoard)
-
-        // Check for win or draw
-        if (checkWin(newBoard, row, col)) {
-          setWinner(currentPlayer)
-          setScores((prev) => ({
-            ...prev,
-            [currentPlayer]: prev[currentPlayer] + 1,
-          }))
-          setTimerActive(false)
-        } else if (checkDraw(newBoard)) {
-          setIsDraw(true)
-          setTimerActive(false)
-        } else {
-          // Switch player
-          setCurrentPlayer(currentPlayer === 1 ? 2 : 1)
-        }
-
-        break
-      }
-    }
-  }, [board, currentPlayer, isDraw, isPaused, isCpuThinking, winner, checkWin, checkDraw])
-
-  const makeCpuMove = useCallback(() => {
-    // Simple CPU strategy: find valid columns and pick one randomly
-    const validColumns = []
-
-    for (let col = 0; col < COLS; col++) {
-      if (board[0][col] === null) {
-        validColumns.push(col)
-      }
-    }
-
-    if (validColumns.length > 0) {
-      const randomCol = validColumns[Math.floor(Math.random() * validColumns.length)]
-      dropPiece(randomCol)
-    }
-  }, [board, dropPiece])
-
-  // CPU player logic
+  // CPU player logic - trigger CPU move when it's their turn
   useEffect(() => {
-    // Only proceed if it's CPU's turn and the game is active
-    if (currentPlayer === 2 && !winner && !isDraw && !isPaused) {
-      console.log("CPU's turn - thinking...")
-      
-      // Set thinking state to true
+    if (gameState && gameState.currentPlayer === 2 && !gameState.winner && !gameState.isDraw && !isPaused) {
       setIsCpuThinking(true)
 
-      // Add a small delay to make it seem like the CPU is thinking
+      // Add a delay to make it seem like the CPU is thinking
       const cpuDelay = setTimeout(() => {
-        // Find valid columns for CPU move
-        const validColumns = []
-        for (let col = 0; col < COLS; col++) {
-          if (board[0][col] === null) {
-            validColumns.push(col)
-          }
-        }
-
-        // Make the move if there are valid columns
-        if (validColumns.length > 0) {
-          // Choose a random column
-          const randomCol = validColumns[Math.floor(Math.random() * validColumns.length)]
-          // Make the move directly here instead of calling another function
-          for (let row = ROWS - 1; row >= 0; row--) {
-            const newBoard = [...board]
-            if (newBoard[row][randomCol] === null) {
-              newBoard[row][randomCol] = 2 // CPU is player 2
-              setBoard(newBoard)
-              
-              // Check for win or draw
-              if (checkWin(newBoard, row, randomCol)) {
-                setWinner(2)
-                setScores(prev => ({ ...prev, 2: prev[2] + 1 }))
-                setTimerActive(false)
-              } else if (checkDraw(newBoard)) {
-                setIsDraw(true)
-                setTimerActive(false)
-              } else {
-                // Switch back to player 1
-                setCurrentPlayer(1)
-              }
-              
-              break
-            }
-          }
-        }
-        
-        // CPU finished thinking
-        setIsCpuThinking(false)
+        makeCpuMove()
       }, 1500)
 
-      // Cleanup function
       return () => clearTimeout(cpuDelay)
     }
-  }, [currentPlayer, winner, isDraw, isPaused, board, checkWin, checkDraw])
+  }, [gameState, isPaused, makeCpuMove])
 
-  const resetGame = () => {
-    setBoard(createEmptyBoard())
-    setCurrentPlayer(1)
-    setWinner(null)
-    setIsDraw(false)
-    setTimerActive(true)
-    setTurnTimer(10)
-    setIsPaused(false)
+  // Function to fetch the state of an existing game
+  const fetchGameState = async (id: string) => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      
+      const response = await fetch(`/api/game?gameId=${id}`)
+      const result = await response.json()
+      
+      if (result.success) {
+        console.log('Retrieved existing game:', result.data)
+        setGameState(result.data)
+      } else {
+        console.log('Failed to retrieve game, initializing new one')
+        // If we couldn't fetch the existing game, initialize a new one
+        initializeGame()
+      }
+    } catch (err) {
+      console.error('Error fetching game state:', err)
+      // If error, initialize a new game
+      initializeGame()
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Initialize a new game
+  const initializeGame = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      const response = await fetch('/api/game', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to initialize game')
+      }
+
+      console.log('Game initialized successfully:', result.data)
+      console.log('Game ID:', result.data.id)
+      
+      // Save game ID to localStorage
+      localStorage.setItem("gameId", result.data.id)
+      
+      setGameState(result.data)
+      setGameId(result.data.id)
+      setTimerActive(true)
+      setIsPaused(false)
+    } catch (err) {
+      console.error('Error initializing game:', err)
+      setError('Failed to initialize game. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Reset the game
+  const resetGame = async () => {
+    if (!gameId) {
+      // If no game exists, initialize a new one
+      return initializeGame()
+    }
+
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      const response = await fetch('/api/game/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          gameId,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        // If game not found, initialize a new game
+        if (result.error === 'Game not found') {
+          console.log('Game not found during reset, initializing new game...');
+          return initializeGame();
+        }
+        
+        throw new Error(result.error || 'Failed to reset game')
+      }
+
+      setGameState(result.data)
+      setTimerActive(true)
+      setIsPaused(false)
+    } catch (err) {
+      console.error('Error resetting game:', err)
+      setError('Failed to reset game. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Start a completely new game, resetting everything
+  const startNewGame = async () => {
+    // Clear game ID from localStorage
+    try {
+      localStorage.removeItem("gameId");
+      console.log('Game ID cleared from localStorage for new game');
+    } catch (err) {
+      console.error('Failed to clear game ID from localStorage:', err);
+    }
+    
+    // Reset gameId state
+    setGameId("");
+    
+    // Then initialize a new game
+    await initializeGame();
   }
 
   const quitGame = () => {
+    // Clear game ID from localStorage when quitting
+    try {
+      localStorage.removeItem("gameId");
+      console.log('Game ID cleared from localStorage');
+    } catch (err) {
+      console.error('Failed to clear game ID from localStorage:', err);
+    }
+    
     router.push("/")
   }
 
   const getColumnTooltip = (col: number) => {
+    if (!gameState || !gameState.board) return null
+
     // Find the lowest empty row in the column
-    for (let row = ROWS - 1; row >= 0; row--) {
-      if (!board[row][col]) {
+    for (let row = 5; row >= 0; row--) {
+      if (gameState.board[row][col] === null) {
         return row
       }
     }
     return null // Column is full
+  }
+
+  // Loading state
+  if (isLoading && !gameState) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
+        <div className="text-2xl font-bold text-white">Loading game...</div>
+      </div>
+    )
+  }
+
+  // Error state
+  if (error && !gameState) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
+        <div className="text-2xl font-bold text-red-500">{error}</div>
+        <button 
+          className="mt-4 bg-accent-red text-white px-6 py-2 rounded-full" 
+          onClick={initializeGame}
+        >
+          Try Again
+        </button>
+      </div>
+    )
+  }
+
+  // If game state is not loaded yet
+  if (!gameState) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
+        <div className="text-2xl font-bold text-white">Initializing game...</div>
+      </div>
+    )
   }
 
   return (
@@ -277,7 +480,7 @@ export default function GameBoard() {
             </div>
           </div>
           <div className="font-bold text-sm truncate">{playerName}</div>
-          <div className="text-4xl font-bold">{scores[1]}</div>
+          <div className="text-4xl font-bold">{gameState.scores[1]}</div>
         </div>
 
         {/* Game Board */}
@@ -286,17 +489,17 @@ export default function GameBoard() {
             className="bg-primary rounded-lg p-4 grid grid-cols-7 gap-2 shadow-game border-4 border-black/10"
             onMouseLeave={() => setHoverColumn(null)}
           >
-            {board.map((row, rowIndex) =>
+            {gameState.board.map((row, rowIndex) =>
               row.map((cell, colIndex) => (
                 <div
                   key={`${rowIndex}-${colIndex}`}
                   className="relative w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16"
                   onMouseEnter={() => {
-                    if (!winner && !isDraw && !isPaused && currentPlayer === 1 && getColumnTooltip(colIndex) !== null) {
+                    if (!gameState.winner && !gameState.isDraw && !isPaused && gameState.currentPlayer === 1 && getColumnTooltip(colIndex) !== null) {
                       setHoverColumn(colIndex)
                     }
                   }}
-                  onClick={() => currentPlayer === 1 && dropPiece(colIndex)}
+                  onClick={() => gameState.currentPlayer === 1 && makePlayerMove(colIndex)}
                 >
                   <div
                     className={`
@@ -307,7 +510,7 @@ export default function GameBoard() {
                   ></div>
 
                   {/* Hover indicator */}
-                  {hoverColumn === colIndex && !cell && !winner && !isDraw && !isPaused && currentPlayer === 1 && (
+                  {hoverColumn === colIndex && !cell && !gameState.winner && !gameState.isDraw && !isPaused && gameState.currentPlayer === 1 && (
                     <div className={`absolute inset-0 rounded-full border-4 border-white/30 pointer-events-none`}></div>
                   )}
                 </div>
@@ -319,22 +522,22 @@ export default function GameBoard() {
           <div className="absolute -bottom-16 left-1/2 transform -translate-x-1/2">
             <div
               className={`
-              bg-${currentPlayer === 1 ? "accent-red" : "accent-yellow"} 
+              bg-${gameState.currentPlayer === 1 ? "accent-red" : "accent-yellow"} 
               text-white px-6 py-3 rounded-lg shadow-game text-center min-w-[160px]
             `}
             >
               <div className="text-sm font-bold">
-                {winner
-                  ? winner === 1
+                {gameState.winner
+                  ? gameState.winner === 1
                     ? `${playerName} WINS`
                     : "CPU WINS"
-                  : isDraw
+                  : gameState.isDraw
                     ? "DRAW"
-                    : currentPlayer === 1
+                    : gameState.currentPlayer === 1
                       ? `${playerName}'S TURN`
                       : "CPU'S TURN"}
               </div>
-              {!winner && !isDraw && (
+              {!gameState.winner && !gameState.isDraw && (
                 <div className="text-3xl font-bold">{isCpuThinking ? "..." : `${turnTimer}s`}</div>
               )}
             </div>
@@ -349,9 +552,16 @@ export default function GameBoard() {
             </div>
           </div>
           <div className="font-bold text-sm">CPU</div>
-          <div className="text-4xl font-bold">{scores[2]}</div>
+          <div className="text-4xl font-bold">{gameState.scores[2]}</div>
         </div>
       </div>
+
+      {/* Display any errors as a toast/notification */}
+      {error && (
+        <div className="fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded shadow-lg">
+          {error}
+        </div>
+      )}
 
       {/* Pause Menu */}
       {isPaused && (
@@ -375,6 +585,15 @@ export default function GameBoard() {
                 RESTART
               </button>
               <button
+                className="w-full bg-white text-black py-3 rounded-lg font-bold shadow-game"
+                onClick={() => {
+                  startNewGame()
+                  setIsPaused(false)
+                }}
+              >
+                NEW GAME
+              </button>
+              <button
                 className="w-full bg-accent-red text-white py-3 rounded-lg font-bold shadow-game"
                 onClick={quitGame}
               >
@@ -386,10 +605,10 @@ export default function GameBoard() {
       )}
 
       {/* Winner Announcement */}
-      {winner && (
+      {gameState.winner && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-secondary text-black p-8 rounded-lg shadow-lg w-80 text-center">
-            <div className="text-4xl font-bold mb-4">{winner === 1 ? playerName : "CPU"}</div>
+            <div className="text-4xl font-bold mb-4">{gameState.winner === 1 ? playerName : "CPU"}</div>
             <div className="text-6xl font-bold mb-8">WINS</div>
             <div className="flex flex-col gap-4">
               <button className="bg-background text-white px-8 py-3 rounded-full font-bold" onClick={resetGame}>
@@ -405,4 +624,5 @@ export default function GameBoard() {
     </div>
   )
 }
+
 
