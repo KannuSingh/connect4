@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { SmileIcon, Bot } from "lucide-react"
 
@@ -60,70 +60,8 @@ export default function GameBoard() {
     return () => clearTimeout(timer)
   }, [turnTimer, timerActive, isPaused, winner, isDraw, currentPlayer, isCpuThinking])
 
-  // CPU player logic
-  useEffect(() => {
-    if (currentPlayer === 2 && !winner && !isDraw && !isPaused) {
-      setIsCpuThinking(true)
-
-      // Add a small delay to make it seem like the CPU is thinking
-      const cpuDelay = setTimeout(() => {
-        makeCpuMove()
-        setIsCpuThinking(false)
-      }, 1500)
-
-      return () => clearTimeout(cpuDelay)
-    }
-  }, [currentPlayer, winner, isDraw, isPaused])
-
-  const makeCpuMove = () => {
-    // Simple CPU strategy: find valid columns and pick one randomly
-    const validColumns = []
-
-    for (let col = 0; col < COLS; col++) {
-      if (board[0][col] === null) {
-        validColumns.push(col)
-      }
-    }
-
-    if (validColumns.length > 0) {
-      const randomCol = validColumns[Math.floor(Math.random() * validColumns.length)]
-      dropPiece(randomCol)
-    }
-  }
-
-  const dropPiece = (col: number) => {
-    if (winner || isDraw || isPaused || (currentPlayer === 2 && !isCpuThinking)) return
-
-    const newBoard = [...board]
-
-    // Find the lowest empty row in the selected column
-    for (let row = ROWS - 1; row >= 0; row--) {
-      if (!newBoard[row][col]) {
-        newBoard[row][col] = currentPlayer
-        setBoard(newBoard)
-
-        // Check for win or draw
-        if (checkWin(newBoard, row, col)) {
-          setWinner(currentPlayer)
-          setScores((prev) => ({
-            ...prev,
-            [currentPlayer]: prev[currentPlayer] + 1,
-          }))
-          setTimerActive(false)
-        } else if (checkDraw(newBoard)) {
-          setIsDraw(true)
-          setTimerActive(false)
-        } else {
-          // Switch player
-          setCurrentPlayer(currentPlayer === 1 ? 2 : 1)
-        }
-
-        break
-      }
-    }
-  }
-
-  const checkWin = (board: Board, row: number, col: number): boolean => {
+  // Win detection
+  const checkWin = useCallback((board: Board, row: number, col: number): boolean => {
     const directions = [
       [0, 1], // horizontal
       [1, 0], // vertical
@@ -164,11 +102,121 @@ export default function GameBoard() {
     }
 
     return false
-  }
+  }, [])
 
-  const checkDraw = (board: Board): boolean => {
+  // Draw detection
+  const checkDraw = useCallback((board: Board): boolean => {
     return board[0].every((cell) => cell !== null)
-  }
+  }, [])
+
+  const dropPiece = useCallback((col: number) => {
+    // Early return conditions - prevent moves when game is over or paused
+    if (winner || isDraw || isPaused) return
+    
+    // For player 2 (CPU), only allow moves when CPU is thinking
+    if (currentPlayer === 2 && !isCpuThinking) return
+
+    const newBoard = [...board]
+
+    // Find the lowest empty row in the selected column
+    for (let row = ROWS - 1; row >= 0; row--) {
+      if (!newBoard[row][col]) {
+        newBoard[row][col] = currentPlayer
+        setBoard(newBoard)
+
+        // Check for win or draw
+        if (checkWin(newBoard, row, col)) {
+          setWinner(currentPlayer)
+          setScores((prev) => ({
+            ...prev,
+            [currentPlayer]: prev[currentPlayer] + 1,
+          }))
+          setTimerActive(false)
+        } else if (checkDraw(newBoard)) {
+          setIsDraw(true)
+          setTimerActive(false)
+        } else {
+          // Switch player
+          setCurrentPlayer(currentPlayer === 1 ? 2 : 1)
+        }
+
+        break
+      }
+    }
+  }, [board, currentPlayer, isDraw, isPaused, isCpuThinking, winner, checkWin, checkDraw])
+
+  const makeCpuMove = useCallback(() => {
+    // Simple CPU strategy: find valid columns and pick one randomly
+    const validColumns = []
+
+    for (let col = 0; col < COLS; col++) {
+      if (board[0][col] === null) {
+        validColumns.push(col)
+      }
+    }
+
+    if (validColumns.length > 0) {
+      const randomCol = validColumns[Math.floor(Math.random() * validColumns.length)]
+      dropPiece(randomCol)
+    }
+  }, [board, dropPiece])
+
+  // CPU player logic
+  useEffect(() => {
+    // Only proceed if it's CPU's turn and the game is active
+    if (currentPlayer === 2 && !winner && !isDraw && !isPaused) {
+      console.log("CPU's turn - thinking...")
+      
+      // Set thinking state to true
+      setIsCpuThinking(true)
+
+      // Add a small delay to make it seem like the CPU is thinking
+      const cpuDelay = setTimeout(() => {
+        // Find valid columns for CPU move
+        const validColumns = []
+        for (let col = 0; col < COLS; col++) {
+          if (board[0][col] === null) {
+            validColumns.push(col)
+          }
+        }
+
+        // Make the move if there are valid columns
+        if (validColumns.length > 0) {
+          // Choose a random column
+          const randomCol = validColumns[Math.floor(Math.random() * validColumns.length)]
+          // Make the move directly here instead of calling another function
+          for (let row = ROWS - 1; row >= 0; row--) {
+            const newBoard = [...board]
+            if (newBoard[row][randomCol] === null) {
+              newBoard[row][randomCol] = 2 // CPU is player 2
+              setBoard(newBoard)
+              
+              // Check for win or draw
+              if (checkWin(newBoard, row, randomCol)) {
+                setWinner(2)
+                setScores(prev => ({ ...prev, 2: prev[2] + 1 }))
+                setTimerActive(false)
+              } else if (checkDraw(newBoard)) {
+                setIsDraw(true)
+                setTimerActive(false)
+              } else {
+                // Switch back to player 1
+                setCurrentPlayer(1)
+              }
+              
+              break
+            }
+          }
+        }
+        
+        // CPU finished thinking
+        setIsCpuThinking(false)
+      }, 1500)
+
+      // Cleanup function
+      return () => clearTimeout(cpuDelay)
+    }
+  }, [currentPlayer, winner, isDraw, isPaused, board, checkWin, checkDraw])
 
   const resetGame = () => {
     setBoard(createEmptyBoard())
