@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 // Mock the game-board component since it has a dependency cycle issue

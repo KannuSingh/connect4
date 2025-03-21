@@ -8,6 +8,7 @@ A modern implementation of the classic Connect 4 game using Next.js, React, and 
 - Player vs CPU gameplay
 - Responsive design with Tailwind CSS
 - Server-side game logic
+- Solana wallet integration
 
 ## Getting Started
 
@@ -44,6 +45,26 @@ This application follows a client-server architecture:
 - **Client**: React components handling the UI and user interactions
 - **Server**: Next.js API routes implementing game logic
 - **Game Engine**: Core game logic implemented in `lib/game-engine.ts`
+- **Wallet Integration**: Solana wallet connection using Reown AppKit
+
+## Solana Wallet Integration
+
+The application includes Solana wallet integration using the Reown AppKit:
+
+1. **Setup**: The integration is configured in `context/appkit-provider.tsx`
+2. **Connection**: Users can connect their Solana wallets from the home page
+3. **Project ID**: You need to obtain a project ID from [Reown Cloud](https://cloud.reown.com) and update it in the provider
+
+To get started with the Solana wallet integration:
+
+1. Sign up at [Reown Cloud](https://cloud.reown.com)
+2. Create a new project and get your project ID
+3. Update the project ID in `context/appkit-provider.tsx`
+
+```typescript
+// Replace with your actual project ID from Reown Cloud
+const projectId = 'YOUR_REOWN_PROJECT_ID'
+```
 
 ## Testing
 

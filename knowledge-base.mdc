@@ -3,3 +3,102 @@
 This document serves as a knowledge base for common issues encountered while developing the Connect 4 game with Solana wallet integration.
 
 ## Table of Contents
+
+## Game Logic Issues
+
+### CPU Move Functionality
+
+**Issue:** The CPU was not making moves after the user completed their turn.
+
+**Solution:** The problem had multiple parts:
+
+1. The `board` state was not included in the dependency array of the CPU player useEffect hook, so it wasn't re-running when the board changed.
+2. The way the CPU logic was structured caused potential timing issues with state updates.
+
+**Comprehensive Fix Applied:**
+
+1. Memoized core game functions (`checkWin` and `checkDraw`) using `useCallback`
+2. Simplified the CPU move logic by including it directly in the useEffect hook
+3. Updated the dependency array to include all necessary dependencies
+4. Added direct state manipulation instead of relying on a separate function call
+
+```tsx
+// Win detection
+const checkWin = useCallback((board: Board, row: number, col: number): boolean => {
+  // Win detection logic...
+}, [])
+
+// Draw detection
+const checkDraw = useCallback((board: Board): boolean => {
+  return board[0].every((cell) => cell !== null)
+}, [])
+
+// CPU player logic
+useEffect(() => {
+  // Only proceed if it's CPU's turn and the game is active
+  if (currentPlayer === 2 && !winner && !isDraw && !isPaused) {
+    console.log("CPU's turn - thinking...")
+    
+    // Set thinking state to true
+    setIsCpuThinking(true)
+
+    // Add a small delay to make it seem like the CPU is thinking
+    const cpuDelay = setTimeout(() => {
+      // Find valid columns for CPU move
+      const validColumns = []
+      for (let col = 0; col < COLS; col++) {
+        if (board[0][col] === null) {
+          validColumns.push(col)
+        }
+      }
+
+      // Make the move if there are valid columns
+      if (validColumns.length > 0) {
+        // Choose a random column
+        const randomCol = validColumns[Math.floor(Math.random() * validColumns.length)]
+        // Make the move directly here instead of calling another function
+        for (let row = ROWS - 1; row >= 0; row--) {
+          const newBoard = [...board]
+          if (newBoard[row][randomCol] === null) {
+            newBoard[row][randomCol] = 2 // CPU is player 2
+            setBoard(newBoard)
+            
+            // Check for win or draw
+            if (checkWin(newBoard, row, randomCol)) {
+              setWinner(2)
+              setScores(prev => ({ ...prev, 2: prev[2] + 1 }))
+              setTimerActive(false)
+            } else if (checkDraw(newBoard)) {
+              setIsDraw(true)
+              setTimerActive(false)
+            } else {
+              // Switch back to player 1
+              setCurrentPlayer(1)
+            }
+            
+            break
+          }
+        }
+      }
+      
+      // CPU finished thinking
+      setIsCpuThinking(false)
+    }, 1500)
+
+    // Cleanup function
+    return () => clearTimeout(cpuDelay)
+  }
+}, [currentPlayer, winner, isDraw, isPaused, board, checkWin, checkDraw])
+```
+
+**Explanation:** 
+
+1. **React's useEffect Dependency Array**: The useEffect hook only reruns when dependencies change. Initially, the board state wasn't listed, so CPU moves weren't triggered properly.
+
+2. **State Update Timing**: React state updates are asynchronous and batched. When multiple state updates occur in quick succession, timing issues can arise. Our solution directly manages the state transitions within a single effect.
+
+3. **Function Memoization**: Using `useCallback` for functions prevents unnecessary re-creations of functions between renders, ensuring stable references in dependency arrays.
+
+4. **Direct State Logic**: By keeping the CPU move logic directly in the useEffect, we avoid potential timing issues with function calls and ensure the CPU move happens at the right time.
+
+5. **Logging**: Added console logging for easier debugging of CPU move execution.

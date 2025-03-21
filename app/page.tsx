@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { WalletConnectButton } from "@/components/wallet-connect-button"
 
 export default function HomePage() {
   const [playerName, setPlayerName] = useState("")
@@ -59,9 +60,19 @@ export default function HomePage() {
           >
             {isStarting ? "Starting..." : "Play vs CPU"}
           </Button>
+          
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-primary px-2 text-muted-foreground">Or</span>
+            </div>
+          </div>
+          
+          <WalletConnectButton />
         </div>
       </div>
     </div>
   )
 }
-
