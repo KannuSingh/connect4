@@ -1,5 +1,5 @@
 // Setup mock fetch
-import { vi } from 'vitest'
+import { beforeEach, vi } from 'vitest'
 
 // Mock fetch globally
 vi.stubGlobal('fetch', vi.fn())

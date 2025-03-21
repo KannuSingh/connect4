@@ -1,7 +1,7 @@
 'use client'
 
 import { createAppKit } from '@reown/appkit'
-import { solanaWeb3JsAdapter, projectId, networks } from '@/config'
+import { solanaAdapter, projectId, networks } from '@/config'
 
 // Set up metadata
 const metadata = {
@@ -13,7 +13,7 @@ const metadata = {
 
 // Create the modal
 export const modal = createAppKit({
-  adapters: [solanaWeb3JsAdapter],
+  adapters: [solanaAdapter],
   projectId,
   networks,
   metadata,
